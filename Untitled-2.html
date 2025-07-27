@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Public Transport Coverage Logger</title>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body, html {
+      margin: 0;
+      height: 100%;
+      font-family: Arial, sans-serif;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      z-index: -1;
+    }
+
+    h2 {
+      text-align: center;
+      background-color: rgba(255, 255, 255, 0.8);
+      padding: 10px;
+      z-index: 1000;
+      position: relative;
+      margin: 0;
+    }
+
+    .ui-container {
+      position: absolute;
+      top: 60px;
+      left: 10px;
+      z-index: 1000;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 15px;
+      border-radius: 8px;
+      max-width: 350px;
+      overflow-y: auto;
+      max-height: 85%;
+    }
+
+    #routeInfo {
+      position: absolute;
+      bottom: 70px;
+      left: 10px;
+      z-index: 1000;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 8px;
+      max-width: 300px;
+    }
+
+    input, select, textarea, button {
+      width: 100%;
+      margin-top: 5px;
+      padding: 7px;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>🚌 Public Transport Coverage & Feedback Logger</h2>
+
+  <div id="map"></div>
+  
+
+  <div class="ui-container">
+    <form id="infoForm">
+      <label for="name">Your Name:</label>
+      <input type="text" id="name" required>
+
+      <label for="age">Your Age:</label>
+      <input type="number" id="age" required>
+
+  
+
+      <label for="commuterType">Type of Commuter:</label>
+      <select id="commuterType">
+        <option>Student</option>
+        <option>Working Adult</option>
+        <option>Elderly</option>
+        <option>Other</option>
+      </select>
+
+      <label for="transportMode">Mode of Transport:</label>
+    <select id="transportMode">
+  <option value="bus">Bus</option>
+  <option value="train">Train</option>
+</select>
+
+
+      <label for="issueType">Reported Issue:</label>
+      <select id="issueType">
+        <option value="Delay">Delay</option>
+        <option value="Overcrowding">Overcrowding</option>
+        <option value="Unsafe Bus Stop/Station">Unsafe Bus Stop/Station</option>
+        <option value="No Service">No Service</option>
+      </select>
+
+      <label for="rating">Rate the Experience (1=Very Poor (Unsafe / Unreliable), 5=Excellent (Safe & Reliable)):</label>
+      <select id="rating">
+        <option>1</option>
+        <option>2</option>
+        <option>3</option>
+        <option>4</option>
+        <option>5</option>
+      </select>
+
+      <label for="waitTime">Wait Time at Stop (minutes):</label>
+      <input type="number" id="waitTime" min="0">
+
+      <label for="travelTime">Actual Travel Time (minutes):</label>
+      <input type="number" id="travelTime" min="0">
+
+      <label for="timestamp">Date & Time of Journey:</label>
+      <input type="datetime-local" id="timestamp">
+
+      <label for="description">Brief Description (Optional):</label>
+      <textarea id="description" rows="2"></textarea>
+      
+      <label for="latitude">Latitude:</label>
+      <input type="text" id="latitude" readonly>
+
+      <label for="longitude">Longitude:</label>
+      <input type="text" id="longitude" readonly>
+
+
+
+      <button type="button" onclick="submitForm()">Submit</button>
+      <button type="button" onclick="clearRoute()">Reset</button>
+    </form>
+  </div>
+
+  <p id="routeInfo"></p>
+
+  <!-- 🔒 Hidden Google Form Submission -->
+  <form id="googleForm" 
+      action="https://docs.google.com/forms/u/0/d/e/1FAIpQLSeTPOikX1Ga8783ieI2C6F55cPj_EF598MpQ-jqvIUmIW0Dhw/formResponse" 
+      method="POST" target="hidden_iframe" style="display:none;">
+  
+  <input name="entry.492509933" id="google_name">           <!-- Your Name -->
+  <input name="entry.2051617287" id="google_age">           <!-- Your Age -->
+  <input name="entry.1062131545" id="google_commuter">      <!-- Type of Commuter -->
+  <input name="entry.990415426" id="google_mode">           <!-- Mode of Transport -->
+  <input name="entry.2138190776" id="google_issue">         <!-- Reported Issue -->
+  <input name="entry.991108588" id="google_rating">         <!-- Rate of Experience -->
+  <input name="entry.406598878" id="google_wait">           <!-- Wait Time at Stop (minutes) -->
+  <input name="entry.838082385" id="google_travel">         <!-- Actual Travel Time (minutes) -->
+  <input name="entry.1117952066" id="google_timestamp">     <!-- Date & Time of the Journey -->
+  <input name="entry.1475655" id="google_description">      <!-- Brief Description -->
+  <input name="entry.321943338" id="google_lat">            <!-- Latitude of Selected Location -->
+  <input name="entry.479901943" id="google_lng">            <!-- Longitude of Selected Location -->
+
+</form>
+
+    
+  </form>
+  <iframe name="hidden_iframe" style="display:none;"></iframe>
+  <div>
+
+<div id="map"></div>
+
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+ 
+
+  <script>
+    const map = L.map('map').setView([8.25, 79.85], 9);
+    map.zoomControl.setPosition('bottomright');
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let selectedPoint = null;
+    let selectedFeatureName = '';
+    let roadLayer, railwayLayer, busStopLayer, trainStationLayer;
+
+function updateLayers() {
+  // Remove all layers first
+  [roadLayer, railwayLayer, busStopLayer, trainStationLayer].forEach(layer => {
+    if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+  });
+
+  const mode = document.getElementById('transportMode').value;
+  if (mode === 'bus') {
+    if (roadLayer) roadLayer.addTo(map);
+    if (busStopLayer) busStopLayer.addTo(map);
+  } else if (mode === 'train') {
+    if (railwayLayer) railwayLayer.addTo(map);
+    if (trainStationLayer) trainStationLayer.addTo(map);
+  }
+}
+
+fetch('rd.geojson').then(res => res.json()).then(data => {
+  roadLayer = L.geoJSON(data, { style: { color: 'grey', weight: 1 } });
+  updateLayers();
+});
+
+fetch('railway.geojson').then(res => res.json()).then(data => {
+  railwayLayer = L.geoJSON(data, { style: { color: 'brown', weight: 2, dashArray: '5,5' } });
+  updateLayers();
+});
+
+fetch('b-stop.geojson')
+.then(res => res.json())
+.then(data => {
+  busStopLayer = L.geoJSON(data, {
+    pointToLayer: (f, latlng) => {
+      const marker = L.marker(latlng, {
+        icon: L.icon({
+          iconUrl: 'bus-stop.png',
+          iconSize: [24, 24],
+          iconAnchor: [12, 24],
+          popupAnchor: [0, -40]
+        })
+      });
+
+      marker.on('click', () => {
+        map.setView(latlng, 16);
+        selectedPoint = latlng;
+        selectedFeatureName = f.properties.name || "Unnamed Stop";
+        alert("\ud83d\udccd Bus Stop selected: " + selectedFeatureName);
+        document.getElementById("description").value =
+          `Selected Bus Stop at ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
+        document.getElementById("latitude").value = latlng.lat.toFixed(6);
+        document.getElementById("longitude").value = latlng.lng.toFixed(6);
+      });
+
+      return marker;
+    }
+  });
+  updateLayers();
+});
+
+fetch('railway_station.geojson')
+.then(res => res.json())
+.then(data => {
+  trainStationLayer = L.geoJSON(data, {
+    pointToLayer: (f, latlng) => {
+      const marker = L.marker(latlng, {
+        icon: L.icon({
+          iconUrl: 'train-station.png',
+          iconSize: [28, 28],
+          iconAnchor: [14, 28],
+          popupAnchor: [0, -20]
+        })
+      });
+
+      marker.on('click', () => {
+        map.setView(latlng, 16);
+        selectedPoint = latlng;
+        selectedFeatureName = f.properties.name || "Unnamed Station";
+        alert("\ud83d\ude86 Railway Station selected: " + selectedFeatureName);
+        document.getElementById("description").value = `Selected Railway Station at ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
+        document.getElementById("latitude").value = latlng.lat.toFixed(6);
+        document.getElementById("longitude").value = latlng.lng.toFixed(6);
+      });
+
+      return marker;
+    }
+  });
+  updateLayers();
+});
+
+document.getElementById('transportMode').addEventListener('change', updateLayers);
+
+  
+
+
+ function submitForm() {
+  const name = document.getElementById('name').value;
+  const age = document.getElementById('age').value;
+  const commuterType = document.getElementById('commuterType').value;
+  const transportMode = document.getElementById('transportMode').value;
+  const issueType = document.getElementById('issueType').value;
+  const rating = document.getElementById('rating').value;
+  const waitTime = document.getElementById('waitTime').value;
+  const travelTime = document.getElementById('travelTime').value;
+  const timestamp = document.getElementById('timestamp').value;
+  const description = document.getElementById('description').value;
+  const lat = document.getElementById('latitude').value;
+  const lng = document.getElementById('longitude').value;
+
+
+  if (!selectedPoint) { 
+  alert("Please click a bus stop or railway station on the map before submitting.");
+  return;
+}
+
+  document.getElementById('google_name').value = name;
+  document.getElementById('google_age').value = age;
+  document.getElementById('google_commuter').value = commuterType;
+  document.getElementById('google_mode').value = transportMode;
+  document.getElementById('google_issue').value = issueType;
+  document.getElementById('google_rating').value = rating;
+  document.getElementById('google_wait').value = waitTime;
+  document.getElementById('google_travel').value = travelTime;
+  document.getElementById('google_timestamp').value = timestamp;
+  document.getElementById('google_description').value = description;
+  document.getElementById("google_lat").value = lat;
+  document.getElementById("google_lng").value = lng;
+
+
+
+  document.getElementById('googleForm').submit();
+   // Show summary
+   let summary = `<b>Thank you! Your feedback was submitted.</b><br><br>` +
+    `<b>Name:</b> ${name}<br>` +
+    `<b>Age:</b> ${age}<br>` +
+    `<b>Commuter Type:</b> ${commuterType}<br>` +
+    `<b>Mode of Transport:</b> ${transportMode}<br>` +
+    `<b>Reported Issue:</b> ${issueType}<br>` +
+    `<b>Rating:</b> ${rating}<br>` +
+    `<b>Wait Time:</b> ${waitTime} min<br>` +
+    `<b>Travel Time:</b> ${travelTime} min<br>` +
+    `<b>Date & Time:</b> ${timestamp}<br>` +
+    `<b>Description:</b> ${description}<br>` +
+    `<b>Selected Location:</b> ${lat}, ${lng}<br>`;
+  document.getElementById('routeInfo').innerHTML = summary;
+  clearRoute();
+}
+
+function clearRoute() {
+  selectedPoint = null;
+  selectedFeatureName = '';
+  document.getElementById('latitude').value = '';
+  document.getElementById('longitude').value = '';
+}
+// Force layer display on load
+window.addEventListener('load', () => {
+  document.getElementById('transportMode').dispatchEvent(new Event('change'));
+});
+
+
+  </script>
+</body>
+</html>
+
+
